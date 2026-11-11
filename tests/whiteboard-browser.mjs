@@ -122,6 +122,26 @@ try {
   const undone = await teacher.eval('revision');
   await teacher.key('z', 'KeyZ', 90, 10); await teacher.wait(`revision>${undone}`); await teacher.settled();
   check(await teacher.eval("boardScene.elements.some(e=>e.type==='freedraw'&&!e.isDeleted)"), 'Redo restores freehand');
+  await teacher.key('a', 'KeyA', 65, 2);
+  await teacher.key('Delete', 'Delete', 46);
+  await teacher.wait('boardScene.elements.length>0 && boardScene.elements.every(e=>e.isDeleted) && !dirty && !saving');
+  await learner.wait('boardScene.elements.length>0 && boardScene.elements.every(e=>e.isDeleted)');
+  await learner.call('Page.reload');
+  await learner.wait("document.readyState==='complete' && !!document.getElementById('join-form') && typeof boardLoaded!=='undefined' && !boardLoaded");
+  await learner.join(room, 'participant');
+  check(await learner.eval('boardScene.elements.every(e=>e.isDeleted)'), 'Deleting all content stays empty after reload');
+  await teacher.call('Page.bringToFront');
+  await teacher.key('z', 'KeyZ', 90, 2);
+  await teacher.wait('boardScene.elements.some(e=>!e.isDeleted) && !dirty && !saving');
+  await teacher.eval("document.querySelector('[data-testid=toolbar-freedraw]').click();true");
+  const lineBounds = await teacher.bounds();
+  const lineX = lineBounds.x + lineBounds.w * .45, lineY = lineBounds.y + lineBounds.h * .6;
+  const beforeContinuous = await teacher.eval('testNetwork.puts');
+  await teacher.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: lineX, y: lineY, button: 'left', buttons: 1, clickCount: 1 });
+  for (let i=1;i<=22;i++) { await teacher.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: lineX+i*5, y: lineY+Math.sin(i)*20, button: 'left', buttons: 1 }); await sleep(150); }
+  check(await teacher.eval('testNetwork.puts')>beforeContinuous, 'Continuous drawing saves before the pointer is released');
+  await teacher.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: lineX+110, y: lineY, button: 'left', buttons: 0, clickCount: 1 });
+  await teacher.settled();
   const stable = await teacher.eval('revision');
   await teacher.eval("document.querySelector('[data-testid=toolbar-selection]').click();true");
   await teacher.click(600, 650); await teacher.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 650, y: 550, deltaY: 120, deltaX: 0 });
