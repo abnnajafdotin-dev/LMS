@@ -1,0 +1,61 @@
+name: training-lms
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AllowedHosts: ${APP_DOMAIN:?Set APP_DOMAIN in .docker/.env}
+      LiveKit__Url: wss://${LIVEKIT_DOMAIN:?Set LIVEKIT_DOMAIN in .docker/.env}
+      LiveKit__ApiUrl: http://livekit:7880
+      LiveKit__ApiKey: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in .docker/.env}
+      LiveKit__ApiSecret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in .docker/.env}
+      Demo__PresenterCode: ${PRESENTER_CODE:?Set PRESENTER_CODE in .docker/.env}
+    volumes:
+      - app-data:/app/App_Data
+    depends_on:
+      - livekit
+
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses:
+          - "0.0.0.0"
+        rtc:
+          node_ip: ${SERVER_IP:?Set the public IPv4 address in .docker/.env}
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: false
+        keys:
+          ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
+    ports:
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:?Set LIVEKIT_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+      - livekit
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

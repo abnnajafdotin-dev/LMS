@@ -1,0 +1,12 @@
+**
+!src/
+!src/Lms.Poc/
+!src/Lms.Poc/**
+!frontend/
+!frontend/whiteboard/
+!frontend/whiteboard/**
+**/bin/
+**/obj/
+**/App_Data/
+**/node_modules/
+src/Lms.Poc/wwwroot/vendor/whiteboard/
