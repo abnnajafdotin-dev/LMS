@@ -43,6 +43,7 @@ $('join-form').addEventListener('submit', async event => {
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => attachTrack(track, participant));
     room.on(RoomEvent.TrackUnsubscribed, detachTrack);
     room.on(RoomEvent.TrackUnpublished, removePublication);
+    room.on(RoomEvent.ParticipantAttributesChanged, () => { renderPeople(); updateControls(); });
     room.on(RoomEvent.LocalTrackPublished, publication => { if (publication.track) attachTrack(publication.track, room.localParticipant); renderPeople(); updateControls(); });
     room.on(RoomEvent.LocalTrackUnpublished, publication => {
       removePublication(publication);
@@ -55,9 +56,9 @@ $('join-form').addEventListener('submit', async event => {
       if (topic !== 'chat' || !participant || payload.length > 3000) return;
       try { const data = JSON.parse(decoder.decode(payload)); if (typeof data.text === 'string') addMessage(participant.name || 'فراگیر', data.text.slice(0, 500), false); } catch { /* Ignore malformed packets. */ }
     });
-    room.on(RoomEvent.Reconnecting, () => { connected = false; connectionStatus('در حال اتصال مجدد…', 'warn'); boardStatus('اتصال قطع است؛ رسم موقتاً متوقف شد', true); });
-    room.on(RoomEvent.Reconnected, async () => { connected = true; connectionStatus('متصل به LiveKit', 'ok'); await syncBoard(); toast('اتصال بازیابی شد'); });
-    room.on(RoomEvent.Disconnected, () => { connected = false; connectionStatus('اتصال قطع شد', 'bad'); boardStatus('برای اتصال دوباره، خارج و وارد کلاس شوید', true); });
+    room.on(RoomEvent.Reconnecting, () => { connected = false; updateControls(); connectionStatus('در حال اتصال مجدد…', 'warn'); boardStatus('اتصال قطع است؛ رسم موقتاً متوقف شد', true); });
+    room.on(RoomEvent.Reconnected, async () => { connected = true; renderPeople(); updateControls(); connectionStatus('متصل به LiveKit', 'ok'); await syncBoard(); toast('اتصال بازیابی شد'); });
+    room.on(RoomEvent.Disconnected, () => { connected = false; updateControls(); connectionStatus('اتصال قطع شد', 'bad'); boardStatus('برای اتصال دوباره، خارج و وارد کلاس شوید', true); });
     room.on(RoomEvent.AudioPlaybackStatusChanged, () => $('start-audio').hidden = room.canPlaybackAudio);
     await room.connect(credentials.url, credentials.token);
     connected = true;
@@ -115,7 +116,14 @@ function renderPeople() {
     const name = document.createElement('span'); name.textContent = person.name || 'فراگیر';
     const tag = document.createElement('small'); tag.textContent = person === room.localParticipant ? 'شما' : 'متصل';
     const mic = document.createElement('span'); mic.className = 'mic-indicator' + (person.isMicrophoneEnabled ? ' on' : ''); mic.textContent = '♩';
-    row.append(avatar, name, tag, mic); $('participant-list').append(row);
+    row.append(avatar, name, tag, mic);
+    if (person.attributes?.['hand.raised'] === 'true') {
+      row.classList.add('hand-raised');
+      const hand = document.createElement('span'); hand.className = 'hand-indicator'; hand.textContent = '✋';
+      hand.title = 'دست بالا است'; hand.setAttribute('role', 'img'); hand.setAttribute('aria-label', 'دست بالا است');
+      row.append(hand);
+    }
+    $('participant-list').append(row);
   }
   // Muted/unpublished video must not leave a stale image on a participant tile.
   for (const person of people) {
@@ -131,10 +139,27 @@ function renderPeople() {
 }
 function updateControls() {
   if (!room) return;
+  const raised = room.localParticipant.attributes?.['hand.raised'] === 'true';
+  $('raise-hand').hidden = credentials?.role !== 'participant';
+  $('raise-hand').disabled = !connected || handUpdating;
+  $('raise-hand').classList.toggle('enabled', raised);
+  $('raise-hand').setAttribute('aria-pressed', String(raised));
+  $('raise-hand').textContent = raised ? '✋ پایین آوردن دست' : '✋ بالا بردن دست';
   for (const [id, on] of [['toggle-mic', room.localParticipant.isMicrophoneEnabled], ['toggle-camera', room.localParticipant.isCameraEnabled], ['toggle-screen', room.localParticipant.isScreenShareEnabled]]) {
     $(id).classList.toggle('enabled', on); $(id).setAttribute('aria-pressed', String(on));
   }
 }
+let handUpdating = false;
+$('raise-hand').onclick = async () => {
+  if (!connected || handUpdating || credentials?.role !== 'participant') return;
+  handUpdating = true; updateControls();
+  try {
+    const raised = room.localParticipant.attributes?.['hand.raised'] === 'true';
+    await room.localParticipant.setAttributes({ 'hand.raised': raised ? '' : 'true' });
+    renderPeople();
+  } catch { toast('تغییر وضعیت دست انجام نشد؛ دوباره تلاش کنید.'); }
+  finally { handUpdating = false; updateControls(); }
+};
 async function mediaAction(id, action) {
   if (!connected) { toast('ابتدا اتصال کلاس را برقرار کنید.'); return; }
   $(id).disabled = true;

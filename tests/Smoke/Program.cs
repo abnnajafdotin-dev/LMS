@@ -73,6 +73,22 @@ try
     await learner.Wait("document.getElementById('connection').textContent === 'متصل به LiveKit'");
     await teacher.Wait("document.querySelectorAll('.person').length===2");
     Check(true, "Two real browser clients joined the same LiveKit room");
+    Check((await teacher.Eval("document.getElementById('raise-hand').hidden")).GetBoolean(), "Raise hand control is learner-only");
+    await learner.Eval("document.getElementById('raise-hand').click();true");
+    await teacher.Wait("document.querySelectorAll('.person.hand-raised').length===1");
+    await learner.Wait("document.getElementById('raise-hand').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.person.hand-raised').length===1");
+    Check(true, "Learner raised hand visible to teacher and learner");
+    await using (var lateLearner = await Page())
+    {
+        await lateLearner.Eval($"document.getElementById('room-name').value='{browserRoom}';document.querySelector('[value=participant]').click();document.getElementById('join-form').requestSubmit();true");
+        await lateLearner.Wait("document.querySelectorAll('.person.hand-raised').length===1");
+        Check(true, "Late joining learner sees existing raised hand");
+        await lateLearner.Eval("room.disconnect().then(()=>true)");
+    }
+    await learner.Eval("document.getElementById('raise-hand').click();true");
+    await teacher.Wait("document.querySelectorAll('.person.hand-raised').length===0");
+    await learner.Wait("document.getElementById('raise-hand').getAttribute('aria-pressed')==='false'");
+    Check(true, "Lowered hand cleared for teacher and learner");
     await teacher.Call("Page.bringToFront", new { });
     await teacher.Eval("document.getElementById('record-class').click();true");
     await teacher.Wait("classRecording?.recorder.state==='recording'");

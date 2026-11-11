@@ -75,7 +75,7 @@ app.MapPost("/api/join", async (JoinRequest req, HttpContext ctx) =>
         var user = new DemoUser(id, req.Name.Trim(), req.Room!, presenter, DateTimeOffset.UtcNow.AddHours(1));
         sessions[access] = user;
         if (presenter) { board.PresenterId = id; board.PresenterSeen = DateTimeOffset.UtcNow; }
-        var token = Token(id, user.Name, new { roomJoin = true, room = user.Room, canSubscribe = true, canPublish = true, canPublishData = true, canPublishSources = presenter ? new[] { "camera", "microphone", "screen_share", "screen_share_audio" } : new[] { "camera", "microphone" } });
+        var token = Token(id, user.Name, new { roomJoin = true, room = user.Room, canSubscribe = true, canPublish = true, canPublishData = true, canUpdateOwnMetadata = !presenter, canPublishSources = presenter ? new[] { "camera", "microphone", "screen_share", "screen_share_audio" } : new[] { "camera", "microphone" } });
         return Results.Ok(new { token, access, identity = id, name = user.Name, room = user.Room, role = presenter ? "presenter" : "participant", url = config["LiveKit:Url"] ?? "ws://localhost:7880" });
     }
     finally { board.Gate.Release(); }
