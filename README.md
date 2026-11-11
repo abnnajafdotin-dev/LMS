@@ -1,0 +1,76 @@
+# LiveKit Classroom Lab
+
+یک PoC موقت با بک‌اند **.NET 10** و رابط فارسی **HTML/CSS/JavaScript** برای تست واقعی LiveKit؛ بدون Node، Docker، دیتابیس یا سرویس ابری.
+
+## اجرای سریع در ویندوز
+
+در این محیط ابزارهای محلی دریافت شده‌اند. فایل **START-DEMO.cmd** را اجرا کنید، سپس باز کنید:
+
+**http://localhost:5080**
+
+یا در PowerShell از ریشه پروژه:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1
+```
+
+برای اولین اجرا روی یک کامپیوتر Windows x64 دیگر، با اینترنت:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1
+```
+
+SDK دات‌نت و LiveKit در `.tools` قرار می‌گیرند؛ نصب سراسری انجام نمی‌شود. فرانت build جدا ندارد و از خود .NET سرو می‌شود. اجرای بعدی پس از setup به اینترنت یا CDN نیاز ندارد. تمام مجوزهای vendor کنار فایل‌ها نگهداری شده‌اند.
+
+توقف: **STOP-DEMO.cmd** یا:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop.ps1
+```
+
+لاگ‌ها: `.run/backend.out.log`، `.run/backend.err.log` و `.run/livekit.err.log`.
+
+## سناریوی دموی پنج‌دقیقه‌ای
+
+1. صفحه را باز کنید؛ نام خود را وارد و نقش **مدرس** را انتخاب کنید. شناسه پیش‌فرض `livekit-lab` و کد مدرس **demo123** است.
+2. «کپی لینک دعوت» را بزنید. لینک را در پنجره دیگری باز و با نقش **فراگیر** وارد شوید. از همان کامپیوتر استفاده کنید؛ localhost برای دستگاه دیگر نیست.
+3. دوربین و میکروفون مدرس را فعال و مجوز مرورگر را تأیید کنید. برای جلوگیری از اکو، میکروفون پنجره دوم خاموش و ترجیحاً از هدفون استفاده شود.
+4. پیام چت بفرستید؛ این پیام واقعاً از **LiveKit Data** عبور می‌کند.
+5. روی تخته رسم، رنگ و ضخامت قلم را تغییر دهید. فراگیر فقط مشاهده می‌کند. با دکمه ↶ خط آخر را حذف کنید.
+6. پنجره فراگیر را refresh و دوباره وارد کنید؛ آخرین تخته بازیابی می‌شود.
+7. «اشتراک صفحه» را بزنید و یک پنجره را انتخاب کنید. فراگیر به تب اشتراک صفحه می‌رود؛ با برگشت به تب تخته، مستقل بودن آن را نشان دهید.
+8. با «خروج از کلاس» خارج شوید تا مجوز مدرس آزاد شود. بستن ناگهانی تب ممکن است آزاد شدن نقش مدرس را تا ۳۰ ثانیه عقب بیندازد.
+
+## اجزای پیاده‌سازی
+
+- `src/Lms.Poc/Program.cs`: Minimal API، JWT استاندارد HS256 با APIهای داخلی .NET، نشست آزمایشی، مجوز مدرس، Snapshot و فراخوانی LiveKit RoomService.SendData. وابستگی NuGet خارجی ندارد.
+- `src/Lms.Poc/wwwroot`: رابط تک‌صفحه‌ای RTL با فونت محلی، SDK LiveKit، رسانه، چت و تخته Canvas.
+- `src/Lms.Poc/App_Data`: وضعیت تخته هر کلاس، ماندگار بین restartها؛ داده دمو است و در git نادیده گرفته می‌شود.
+- `docs/LMS-POC-PLAN.fa.md`: پلن کوچک‌شده همین PoC.
+
+تخته ابتدا از API با کنترل revision ذخیره می‌شود؛ LiveKit اعلان تغییر را منتشر می‌کند و فراگیر snapshot را می‌خواند. polling سه‌ثانیه‌ای اعلان ازدست‌رفته را جبران می‌کند. این طراحی برای دمو کوچک است و تست ظرفیت انجام نشده است.
+
+## تست خودکار
+
+در حالی که سرورها روشن‌اند، Chrome یا Edge نصب‌شده لازم است:
+
+```powershell
+$env:DOTNET_CLI_HOME = "$PWD/.tools/cli"
+& ./.tools/dotnet/dotnet.exe run --project tests/Smoke
+```
+
+این تست محدودیت نقش، revision، Snapshot و دو مرورگر واقعی با دوربین/میکروفون مصنوعی را بررسی می‌کند. پورت 9223 باید آزاد باشد. تصاویر بررسی در `.run/demo-lobby.png`، `.run/demo-classroom.png` و `.run/demo-mobile.png` نوشته می‌شوند. جزئیات نتیجه در [گزارش تست](docs/POC-VERIFICATION.fa.md) ثبت می‌شود.
+
+## محدوده دمو
+
+این برنامه برای **اجرای محلی** است؛ کلیدهای dev و کد مدرس عمداً نمونه‌اند. احراز هویت سازمانی، ضبط Egress، Excalidraw، SignalR و تست ۳۰۰ نفر در این نسخه نیستند. چت تاریخچه سروری ندارد. تخته حداکثر ۳۰۰ خط و Snapshot برابر 128 KiB دارد. نشست آزمایشی یک ساعت معتبر است و با restart بک‌اند ورود دوباره لازم است.
+
+LiveKit روی `127.0.0.1:7880`، رسانه UDP روی `7882` و TCP روی `7881` اجرا می‌شود. بک‌اند روی `http://localhost:5080` است. مجوز دستگاه‌ها را برای **localhost** بدهید. HTTPS شبکه‌ای و TURN برای دموی محلی دو پنجره‌ای لازم نیستند؛ اجرای چند دستگاه نیازمند تنظیم جداست.
+
+تنظیمات نمونه در `appsettings.json` هستند. برای اتصال به LiveKit دیگر از متغیرهای `LiveKit__Url`، `LiveKit__ApiUrl`، `LiveKit__ApiKey` و `LiveKit__ApiSecret` استفاده کنید؛ `start.ps1` مخصوص اجرای همین LiveKit محلی است. با وجود این تنظیمات، این برنامه احراز هویت و سخت‌سازی Production ندارد.
+
+
+
+Rmote LocalDns
+reg delete "HKCU\Software\Policies\Google\Chrome\WebRtcLocalIpsAllowedUrls" /v 1 /f

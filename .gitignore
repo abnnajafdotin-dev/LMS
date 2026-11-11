@@ -1,0 +1,6 @@
+.tools/
+**/bin/
+**/obj/
+**/App_Data/
+.run/
+*.user
