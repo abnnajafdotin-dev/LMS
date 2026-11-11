@@ -14,6 +14,7 @@ app.UseStaticFiles();
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var sessions = new ConcurrentDictionary<string, DemoUser>();
 var rooms = new ConcurrentDictionary<string, BoardRoom>();
+var recordingDownloads = new ConcurrentDictionary<string, (string Id, string Path, string Name, DateTimeOffset Expires)>();
 var dataPath = Path.Combine(app.Environment.ContentRootPath, "App_Data");
 Directory.CreateDirectory(dataPath);
 var config = app.Configuration;
@@ -74,7 +75,7 @@ app.MapPost("/api/join", async (JoinRequest req, HttpContext ctx) =>
         var user = new DemoUser(id, req.Name.Trim(), req.Room!, presenter, DateTimeOffset.UtcNow.AddHours(1));
         sessions[access] = user;
         if (presenter) { board.PresenterId = id; board.PresenterSeen = DateTimeOffset.UtcNow; }
-        var token = Token(id, user.Name, new { roomJoin = true, room = user.Room, canSubscribe = true, canPublish = true, canPublishData = true });
+        var token = Token(id, user.Name, new { roomJoin = true, room = user.Room, canSubscribe = true, canPublish = true, canPublishData = true, canPublishSources = presenter ? new[] { "camera", "microphone", "screen_share", "screen_share_audio" } : new[] { "camera", "microphone" } });
         return Results.Ok(new { token, access, identity = id, name = user.Name, room = user.Room, role = presenter ? "presenter" : "participant", url = config["LiveKit:Url"] ?? "ws://localhost:7880" });
     }
     finally { board.Gate.Release(); }
@@ -90,7 +91,22 @@ app.MapPost("/api/heartbeat", async (HttpContext ctx) =>
     {
         if (user.Presenter && board.PresenterId != user.Id) return Results.StatusCode(403);
         if (user.Presenter) board.PresenterSeen = DateTimeOffset.UtcNow;
-        return Results.Ok(new { board.State.Revision });
+        return Results.Ok(new { board.State.Revision, recording = board.Recording && board.PresenterSeen > DateTimeOffset.UtcNow.AddSeconds(-30) });
+    }
+    finally { board.Gate.Release(); }
+});
+
+app.MapPost("/api/recording", async (RecordingCommand command, HttpContext ctx) =>
+{
+    var user = User(ctx);
+    if (user is null) return Results.Unauthorized();
+    var board = Board(user.Room);
+    await board.Gate.WaitAsync();
+    try
+    {
+        if (!user.Presenter || board.PresenterId != user.Id || board.PresenterSeen < DateTimeOffset.UtcNow.AddSeconds(-30)) return Results.StatusCode(403);
+        board.Recording = command.Active;
+        return Results.Ok(new { recording = board.Recording });
     }
     finally { board.Gate.Release(); }
 });
@@ -101,7 +117,7 @@ app.MapPost("/api/leave", async (HttpContext ctx) =>
     if (user is null) return Results.Ok();
     var board = Board(user.Room);
     await board.Gate.WaitAsync();
-    try { if (board.PresenterId == user.Id) board.PresenterId = null; }
+    try { if (board.PresenterId == user.Id) { board.PresenterId = null; board.Recording = false; } }
     finally { board.Gate.Release(); }
     sessions.TryRemove(ctx.Request.Headers.Authorization.ToString()[7..], out _);
     return Results.Ok();
@@ -160,9 +176,48 @@ app.MapPut("/api/board", async (BoardCommand command, HttpContext ctx, IHttpClie
     finally { board.Gate.Release(); }
 });
 
+app.MapPost("/api/recordings", async (HttpContext ctx) =>
+{
+    var user = User(ctx);
+    if (user is null) return Results.Unauthorized();
+    if (!user.Presenter) return Results.StatusCode(403);
+    const long limit = 270L * 1024 * 1024;
+    var bodyFeature = ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+    if (bodyFeature is { IsReadOnly: false }) bodyFeature.MaxRequestBodySize = limit;
+    if (ctx.Request.ContentLength is not long length || length < 32 || length > limit) return Results.BadRequest(new { error = "فایل ضبط خالی یا اندازه آن نامعتبر است." });
+    var id = Guid.NewGuid().ToString("N");
+    var directory = Path.Combine(dataPath, "recordings", user.Room);
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, id + ".webm");
+    var temp = path + ".tmp";
+    try
+    {
+        await using (var file = File.Create(temp)) await ctx.Request.Body.CopyToAsync(file, ctx.RequestAborted);
+        var info = new FileInfo(temp);
+        if (info.Length != length) return Results.BadRequest(new { error = "فایل ضبط کامل دریافت نشد؛ دوباره ذخیره کنید." });
+        var header = new byte[4];
+        await using (var file = File.OpenRead(temp)) await file.ReadExactlyAsync(header, ctx.RequestAborted);
+        if (!header.SequenceEqual(new byte[] { 0x1a, 0x45, 0xdf, 0xa3 })) return Results.BadRequest(new { error = "ساختار فایل ضبط معتبر نیست." });
+        File.Move(temp, path);
+        var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        var name = $"class-{user.Room}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.webm";
+        recordingDownloads[key] = (id, path, name, DateTimeOffset.UtcNow.AddHours(1));
+        return Results.Ok(new { bytes = length, url = $"/api/recordings/{id}?key={key}", name });
+    }
+    finally { if (File.Exists(temp)) File.Delete(temp); }
+});
+
+app.MapGet("/api/recordings/{id}", (string id, string? key) =>
+{
+    if (key is null || !recordingDownloads.TryGetValue(key, out var recording) || recording.Id != id || recording.Expires < DateTimeOffset.UtcNow)
+        return Results.Unauthorized();
+    return Results.File(recording.Path, "video/webm", recording.Name, enableRangeProcessing: true);
+});
+
 app.Run();
 
 record JoinRequest(string Name, string Room, string Role, string? Code);
+record RecordingCommand(bool Active);
 record DemoUser(string Id, string Name, string Room, bool Presenter, DateTimeOffset Expires);
 record Stroke(string Color, double Width, double[][] Points);
 record BoardCommand(long BaseRevision, Stroke[] Strokes);
@@ -172,6 +227,7 @@ record BoardState(long Revision, Stroke[] Strokes)
 }
 class BoardRoom
 {
+    public bool Recording { get; set; }
     public SemaphoreSlim Gate { get; } = new(1, 1);
     public BoardState State { get; set; } = new();
     public string? PresenterId { get; set; }

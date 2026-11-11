@@ -41,10 +41,14 @@ $('join-form').addEventListener('submit', async event => {
     const { Room, RoomEvent, Track } = LivekitClient;
     room = new Room({ adaptiveStream: true, dynacast: true, videoCaptureDefaults: { resolution: { width: 640, height: 360, frameRate: 20 } } });
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => attachTrack(track, participant));
-    room.on(RoomEvent.TrackUnsubscribed, track => track.detach().forEach(el => el.remove()));
+    room.on(RoomEvent.TrackUnsubscribed, detachTrack);
+    room.on(RoomEvent.TrackUnpublished, removePublication);
     room.on(RoomEvent.LocalTrackPublished, publication => { if (publication.track) attachTrack(publication.track, room.localParticipant); renderPeople(); updateControls(); });
-    room.on(RoomEvent.LocalTrackUnpublished, publication => { publication.track?.detach().forEach(el => el.remove()); renderPeople(); updateControls(); });
-    for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted]) room.on(event, renderPeople);
+    room.on(RoomEvent.LocalTrackUnpublished, publication => {
+      removePublication(publication);
+      updateStage(); renderPeople(); updateControls();
+    });
+    for (const event of [RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted]) room.on(event, () => { renderPeople(); updateStage(); });
     room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
       // Server-origin packets have no participant. Never trust client board notifications.
       if (topic === 'board.changed' && !participant) { syncBoard(); return; }
@@ -64,7 +68,8 @@ $('join-form').addEventListener('submit', async event => {
     const presenter = credentials.role === 'presenter';
     $('self-role').textContent = presenter ? 'مدرس کلاس' : 'فراگیر';
     $('role-badge').textContent = presenter ? 'مدرس' : 'فراگیر';
-    $('drawing-tools').hidden = !presenter; $('readonly-note').hidden = presenter;
+    $('record-class').hidden = !presenter;
+    $('toggle-screen').hidden = !presenter; $('drawing-tools').hidden = !presenter; $('readonly-note').hidden = presenter;
     canvas.classList.toggle('readonly', !presenter);
     $('board-role').textContent = presenter ? 'قلم در اختیار شماست' : 'مشاهده تخته مدرس';
     connectionStatus('متصل به LiveKit', 'ok'); renderPeople(); updateControls();
@@ -84,10 +89,11 @@ function attachTrack(track, participant) {
   if (track.kind === Track.Kind.Audio && participant === room.localParticipant) return;
   if (track.kind === Track.Kind.Video && track.source !== Track.Source.ScreenShare) { renderPeople(); return; }
   const element = track.attach();
+  element.dataset.trackSid = track.sid;
   if (track.kind === Track.Kind.Audio) { $('audio-tracks').append(element); return; }
   element.autoplay = true; element.playsInline = true;
   if (participant === room.localParticipant) { element.muted = true; element.classList.add('local'); }
-  if (track.source === Track.Source.ScreenShare) { element.classList.remove('local'); $('screen-tracks').append(element); selectTab('screen'); }
+  if (track.source === Track.Source.ScreenShare) { element.classList.remove('local'); $('screen-tracks').append(element); updateStage(); }
 }
 function renderPeople() {
   if (!room) return;
@@ -140,11 +146,28 @@ $('toggle-mic').onclick = () => mediaAction('toggle-mic', () => room.localPartic
 $('toggle-camera').onclick = () => mediaAction('toggle-camera', () => room.localParticipant.setCameraEnabled(!room.localParticipant.isCameraEnabled));
 $('toggle-screen').onclick = () => mediaAction('toggle-screen', () => room.localParticipant.setScreenShareEnabled(!room.localParticipant.isScreenShareEnabled));
 $('start-audio').onclick = () => room.startAudio().catch(() => toast('اجازه پخش صدا داده نشد.'));
-function selectTab(tab) {
-  document.querySelectorAll('.tab').forEach(el => { el.classList.toggle('active', el.dataset.tab === tab); el.setAttribute('aria-selected', String(el.dataset.tab === tab)); });
-  $('board-panel').hidden = tab !== 'board'; $('screen-panel').hidden = tab !== 'screen';
+function detachTrack(track) {
+  track.detach().forEach(el => el.remove());
+  removeTrackElements(track.sid);
+  updateStage();
 }
-document.querySelectorAll('.tab').forEach(el => el.onclick = () => selectTab(el.dataset.tab));
+function removeTrackElements(sid) {
+  // SDK cleanup can detach media before its event reaches us, leaving DOM nodes behind.
+  document.querySelectorAll('[data-track-sid]').forEach(el => { if (el.dataset.trackSid === sid) el.remove(); });
+}
+function removePublication(publication) {
+  if (publication.track) publication.track.detach().forEach(el => el.remove());
+  removeTrackElements(publication.trackSid);
+  updateStage();
+}
+function updateStage() {
+  const sharing = $('screen-tracks').querySelector('video') !== null;
+  $('board-panel').hidden = sharing; $('screen-panel').hidden = !sharing;
+  $('stage-title').textContent = sharing ? '▣ صفحه مدرس' : '✎ تخته کلاس';
+  $('return-board').hidden = !sharing || credentials?.role !== 'presenter';
+  $('board-status').hidden = sharing;
+}
+$('return-board').onclick = () => mediaAction('return-board', () => room.localParticipant.setScreenShareEnabled(false));
 $('copy-invite').onclick = async () => {
   const url = new URL(location.origin); url.searchParams.set('room', credentials.room);
   try { await navigator.clipboard.writeText(url.href); toast('لینک دعوت کپی شد؛ آن را در یک پنجره دیگر باز کنید.'); }
@@ -230,11 +253,13 @@ async function syncBoard() {
 }
 async function poll() {
   if (!credentials) return;
-  try { const data = await api('heartbeat', { method: 'POST' }); const wasReady = backendReady; backendReady = true; if (data.revision !== revision || !wasReady) await syncBoard(); if (dirty && connected) saveBoard(); }
+  try { const data = await api('heartbeat', { method: 'POST' }); $('recording-notice').hidden = !data.recording; const wasReady = backendReady; backendReady = true; if (data.revision !== revision || !wasReady) await syncBoard(); if (dirty && connected) saveBoard(); }
   catch (error) { backendReady = false; boardStatus('بک‌اند در دسترس نیست؛ رسم متوقف شد', true); if (error.status === 403) { connected = false; connectionStatus('مجوز مدرس تغییر کرده است', 'bad'); } }
 }
 $('leave').onclick = async () => {
   $('leave').disabled = true;
+  await stopClassRecording();
+  if (recordingNeedsDownload) { toast('ابتدا فایل ضبط را دریافت کنید، سپس خارج شوید.'); $('leave').disabled = false; return; }
   finishStroke(); clearTimeout(saveTimer); saveTimer = null;
   await saveBoard();
   // A previous save may still be in flight; do not claim pending strokes were saved.
@@ -244,4 +269,4 @@ $('leave').onclick = async () => {
   await room.disconnect(); location.href = location.pathname;
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && credentials) { poll(); syncBoard(); } });
-window.addEventListener('beforeunload', event => { if (dirty || saving) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (dirty || saving || classRecording || recordingNeedsDownload) { event.preventDefault(); event.returnValue = ''; } });

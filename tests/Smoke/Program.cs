@@ -35,6 +35,10 @@ Check((await Auth("PUT", "/api/board", presenter, command)).StatusCode == HttpSt
 var board = await (await Auth("GET", "/api/board", student)).Content.ReadFromJsonAsync<JsonElement>();
 Check(board.GetProperty("revision").GetInt32() == 1 && board.GetProperty("strokes").GetArrayLength() == 1, "Late join snapshot available");
 Check((await http.GetAsync("/api/board")).StatusCode == HttpStatusCode.Unauthorized, "Snapshot requires demo session");
+Check((await Auth("POST", "/api/recording", student, new { active = true })).StatusCode == HttpStatusCode.Forbidden, "Learner cannot start recording status");
+Check((await http.PostAsJsonAsync("/api/recording", new { active = true })).StatusCode == HttpStatusCode.Unauthorized, "Recording status requires authentication");
+Check((await Auth("POST", "/api/recordings", presenter)).StatusCode == HttpStatusCode.BadRequest, "Empty recording upload rejected");
+Check((await Auth("POST", "/api/recordings", student)).StatusCode == HttpStatusCode.Forbidden, "Learner cannot upload recordings");
 await Auth("POST", "/api/leave", presenter); await Auth("POST", "/api/leave", student);
 
 var browserPath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
@@ -69,6 +73,15 @@ try
     await learner.Wait("document.getElementById('connection').textContent === 'متصل به LiveKit'");
     await teacher.Wait("document.querySelectorAll('.person').length===2");
     Check(true, "Two real browser clients joined the same LiveKit room");
+    await teacher.Call("Page.bringToFront", new { });
+    await teacher.Eval("document.getElementById('record-class').click();true");
+    await teacher.Wait("classRecording?.recorder.state==='recording'");
+    await Task.Delay(1500);
+    await teacher.Eval("stopClassRecording().then(()=>true)");
+    var silentUrl = await teacher.Eval("document.getElementById('record-download').getAttribute('href')");
+    var silentBytes = await http.GetByteArrayAsync(silentUrl.GetString());
+    Check(silentBytes.Length > 1000 && silentBytes[0] == 0x1a, "Recording without microphones or cameras saves nonempty WebM on server");
+    await teacher.Eval("recordingNeedsDownload=false;true");
     await teacher.Eval("document.getElementById('chat-input').value='LiveKit data smoke test';document.getElementById('chat-form').requestSubmit();true");
     await learner.Wait("document.getElementById('chat-messages').textContent.includes('LiveKit data smoke test')");
     Check(true, "Reliable LiveKit Data chat delivered between browsers");
@@ -97,6 +110,64 @@ try
     await learner.Wait("document.getElementById('board-placeholder').hidden && document.getElementById('board-status').textContent.includes('ذخیره شد')");
     await teacher.Wait("document.getElementById('board-status').textContent.includes('نسخه')");
     Check(true, "Teacher pointer drawing synchronized via server LiveKit Data with learner polling disabled");
+    Check((await learner.Eval("document.getElementById('toggle-screen').hidden && document.querySelectorAll('[role=tab]').length===0")).GetBoolean(), "Learner follows one stage without content tabs");
+    // Substitute only the capture picker; publication/subscription still use real LiveKit media.
+    await learner.Eval("document.getElementById('toggle-mic').click();true");
+    await teacher.Wait("[...room.remoteParticipants.values()].some(p=>p.audioTrackPublications.size>0)");
+    await teacher.Eval("window.__recordText=[];window.__originalFillText=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){if(this.canvas!==canvas)window.__recordText.push(String(text));return window.__originalFillText.call(this,text,...args)};startClassRecording().then(()=>true)");
+    await teacher.Wait("classRecording?.recorder.state==='recording' && classRecording.sources.size===2");
+    await learner.Eval("poll().then(()=>true)");
+    Check((await learner.Eval("!document.getElementById('recording-notice').hidden")).GetBoolean(), "Learner sees recording notice; local and remote microphones mixed");
+    await teacher.Eval("navigator.mediaDevices.getDisplayMedia=async()=>{const c=document.createElement('canvas');c.width=640;c.height=360;const x=c.getContext('2d');window.__captureTimer=setInterval(()=>{x.fillStyle='#7156ed';x.fillRect(0,0,640,360);x.fillStyle='white';x.fillText(String(Date.now()),20,30)},100);return c.captureStream(10)};document.getElementById('toggle-screen').click();true");
+    await learner.Wait("document.getElementById('board-panel').hidden && !document.getElementById('screen-panel').hidden && document.querySelector('#screen-tracks video').readyState>=2");
+    await teacher.Wait("!document.getElementById('return-board').hidden");
+    Check(true, "Presenter screen replaces board automatically for learner");
+    await learner.Eval("window.__screenReload=true");
+    await learner.Call("Page.reload", new { });
+    await learner.Wait("!window.__screenReload && !!window.LivekitClient && !!document.getElementById('join-form')");
+    await learner.Eval($"document.getElementById('room-name').value='{browserRoom}';document.querySelector('[value=participant]').click();document.getElementById('join-form').requestSubmit();true");
+    await learner.Wait("!document.getElementById('classroom').hidden && document.getElementById('board-panel').hidden && document.querySelector('#screen-tracks video').readyState>=2");
+    Check(true, "Late join follows active presenter screen");
+    await teacher.Eval("document.getElementById('return-board').click();true");
+    try { await learner.Wait("!document.getElementById('board-panel').hidden && document.getElementById('screen-panel').hidden && document.getElementById('board-placeholder').hidden"); }
+    catch {
+        Console.WriteLine("Return teacher: " + await teacher.Eval("({sharing:room.localParticipant.isScreenShareEnabled,tracks:document.querySelectorAll('#screen-tracks video').length,toast:document.getElementById('toast').textContent})"));
+        Console.WriteLine("Return learner: " + await learner.Eval("({tracks:document.querySelectorAll('#screen-tracks video').length,boardHidden:document.getElementById('board-panel').hidden,strokes:strokes.length})"));
+        throw;
+    }
+    Check(true, "Return to board stops sharing and preserves learner drawing");
+    await teacher.Eval("document.getElementById('toggle-screen').click();true");
+    await learner.Wait("document.getElementById('board-panel').hidden");
+    await teacher.Eval("room.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShare).track.mediaStreamTrack.dispatchEvent(new Event('ended'));true");
+    await learner.Wait("!document.getElementById('board-panel').hidden && document.getElementById('screen-panel').hidden");
+    await teacher.Eval("clearInterval(window.__captureTimer);true");
+    Check(true, "Browser capture ended returns everyone to board");
+    await teacher.Eval("stopClassRecording().then(()=>true)");
+    Check((await teacher.Eval("recordingNeedsDownload && !document.getElementById('record-download').hidden && !window.__recordText.some(t=>t.includes('LiveKit data smoke test'))")).GetBoolean(), "Recording ready for download and chat excluded from rendered text");
+    var recording = await teacher.Eval("(async()=>{const blob=await(await fetch(recordingUrl)).blob();const bytes=new Uint8Array(await blob.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary)})()");
+    var recordingBytes = Convert.FromBase64String(recording.GetString()!);
+    Check(recordingBytes.Length > 10000 && recordingBytes[0] == 0x1a && recordingBytes[1] == 0x45, "Nonempty WebM recording generated");
+    await File.WriteAllBytesAsync(Path.Combine(output, "demo-recording.webm"), recordingBytes);
+    var downloadPath = Path.Combine(output, "recording-download-" + Guid.NewGuid().ToString("N")[..8]);
+    Directory.CreateDirectory(downloadPath);
+    await teacher.Call("Browser.setDownloadBehavior", new { behavior = "allow", downloadPath });
+    await teacher.Eval("document.getElementById('record-download').click();true");
+    string? downloadedFile = null;
+    for (var attempt = 0; attempt < 60; attempt++)
+    {
+        downloadedFile = Directory.GetFiles(downloadPath, "*.webm").FirstOrDefault();
+        if (downloadedFile is not null && new FileInfo(downloadedFile).Length == recordingBytes.Length) break;
+        await Task.Delay(200);
+    }
+    Check(downloadedFile is not null && (await File.ReadAllBytesAsync(downloadedFile)).SequenceEqual(recordingBytes), "Actual browser download on disk exactly matches nonempty recorded bytes");
+    await teacher.Call("Page.bringToFront", new { });
+    await teacher.Eval("window.__playback=document.createElement('video');window.__playback.style='position:fixed;inset:0;width:100vw;height:100vh;z-index:9999;background:black';window.__playback.muted=true;window.__playback.src=recordingUrl;document.body.append(window.__playback);window.__playback.play().then(()=>true)");
+    await teacher.Wait("window.__playback.videoWidth===1280 && window.__playback.currentTime>0.5");
+    Check(true, "Recorded WebM decodes and plays at 1280x720");
+    await teacher.Screenshot(Path.Combine(output, "demo-recording-playback.png"));
+    var audioEnergy = await teacher.Eval("(async()=>{const a=new AudioContext();try{const b=await a.decodeAudioData(await(await fetch(recordingUrl)).arrayBuffer());return b.getChannelData(0).some(v=>Math.abs(v)>0.001)}finally{await a.close()}})()");
+    Check(audioEnergy.GetBoolean(), "Recorded WebM audio decodes with non-silent samples");
+    await teacher.Eval("window.__playback.pause();window.__playback.remove();recordingNeedsDownload=false;CanvasRenderingContext2D.prototype.fillText=window.__originalFillText;true");
     await teacher.Screenshot(Path.Combine(output, "demo-classroom.png"));
     await teacher.Call("Emulation.setDeviceMetricsOverride", new { width = 390, height = 844, deviceScaleFactor = 1, mobile = true });
     await teacher.Screenshot(Path.Combine(output, "demo-mobile.png"));
