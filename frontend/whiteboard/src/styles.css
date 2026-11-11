@@ -1,0 +1,14 @@
+@font-face {
+  font-family: Vazirmatn;
+  src: url('/vendor/Vazirmatn.woff2') format('woff2');
+  font-display: swap;
+}
+* { box-sizing: border-box; }
+.whiteboard-preview { margin: 0; background: #f4f6fa; color: #243451; font-family: Vazirmatn, sans-serif; }
+.whiteboard-preview > header { padding: 12px 20px; }
+.whiteboard-preview h1 { font-size: 20px; margin: 0; }
+.whiteboard-preview p { margin: 8px 0; }
+.whiteboard-preview > header button { font: inherit; cursor: pointer; padding: 6px 12px; }
+#status { margin-inline-start: 12px; }
+#whiteboard-root { direction: ltr; height: calc(100dvh - 155px); min-height: 420px; margin: 0 12px 12px; border: 1px solid #d8dfeb; }
+@media (max-width: 600px) { .whiteboard-preview > header { padding: 10px; } .whiteboard-preview h1 { font-size: 16px; } #whiteboard-root { height: 70dvh; } }

@@ -27,6 +27,7 @@ if (-not (Test-Path "$vendor/Vazirmatn.woff2")) {
     Invoke-WebRequest 'https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn%5Bwght%5D.woff2' -OutFile "$vendor/Vazirmatn.woff2"
     Invoke-WebRequest 'https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/OFL.txt' -OutFile "$vendor/Vazirmatn-OFL.txt"
 }
+& (Join-Path $PSScriptRoot 'setup-whiteboard.ps1')
 & '.tools/dotnet/dotnet.exe' build 'src/Lms.Poc' --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 Write-Host 'Ready. Run: powershell -ExecutionPolicy Bypass -File scripts/start.ps1' -ForegroundColor Green

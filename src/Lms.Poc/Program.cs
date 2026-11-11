@@ -9,11 +9,21 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 160 * 1024);
 builder.Services.AddHttpClient("livekit", c => c.Timeout = TimeSpan.FromSeconds(3));
 var app = builder.Build();
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path == "/api/board")
+    {
+        var size = ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (size is { IsReadOnly: false }) size.MaxRequestBodySize = 1100 * 1024;
+    }
+    try { await next(ctx); }
+    catch (InvalidDataException ex) { ctx.Response.StatusCode = 503; await ctx.Response.WriteAsJsonAsync(new { error = ex.Message }); }
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var sessions = new ConcurrentDictionary<string, DemoUser>();
-var rooms = new ConcurrentDictionary<string, BoardRoom>();
+var rooms = new ConcurrentDictionary<string, Lazy<BoardRoom>>();
 var recordingDownloads = new ConcurrentDictionary<string, (string Id, string Path, string Name, DateTimeOffset Expires)>();
 var dataPath = Path.Combine(app.Environment.ContentRootPath, "App_Data");
 Directory.CreateDirectory(dataPath);
@@ -39,12 +49,7 @@ DemoUser? User(HttpContext ctx)
         && u.Expires > DateTimeOffset.UtcNow ? u : null;
 }
 
-BoardRoom Board(string room) => rooms.GetOrAdd(room, id =>
-{
-    var path = Path.Combine(dataPath, id + ".json");
-    try { return new BoardRoom { State = JsonSerializer.Deserialize<BoardState>(File.ReadAllText(path), json) ?? new() }; }
-    catch (FileNotFoundException) { return new BoardRoom(); }
-});
+BoardRoom Board(string room) => rooms.GetOrAdd(room, id => new Lazy<BoardRoom>(() => new BoardRoom { State = Whiteboard.Load(Path.Combine(dataPath, id + ".json")) })).Value;
 
 app.MapGet("/api/health", async (IHttpClientFactory clients) =>
 {
@@ -138,10 +143,11 @@ app.MapPut("/api/board", async (BoardCommand command, HttpContext ctx, IHttpClie
     var user = User(ctx);
     if (user is null) return Results.Unauthorized();
     if (!user.Presenter) return Results.StatusCode(403);
-    if (command.Strokes is null || command.Strokes.Length > 300 || command.Strokes.Any(s =>
-        s is null || s.Points is null || s.Points.Length is < 1 or > 1000 || !double.IsFinite(s.Width) || s.Width is < 1 or > 16 ||
-        !Regex.IsMatch(s.Color ?? "", "^#[a-fA-F0-9]{6}$") || s.Points.Any(p => p is null || p.Length != 2 || p.Any(v => !double.IsFinite(v) || v is < 0 or > 1))))
-        return Results.BadRequest(new { error = "حد تخته: ۳۰۰ خط، هر خط ۱۰۰۰ نقطه." });
+    if (command.SchemaVersion != 2 || command.Engine != "excalidraw" || command.BaseRevision < 0)
+        return Results.BadRequest(new { error = "نسخه تخته نامعتبر است؛ صفحه را تازه کنید." });
+    try { Whiteboard.Validate(command.Scene); }
+    catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or KeyNotFoundException or FormatException)
+    { return Results.BadRequest(new { error = "محتوای تخته معتبر نیست یا از محدودیت مجاز فراتر رفته است." }); }
     var board = Board(user.Room);
     await board.Gate.WaitAsync();
     try
@@ -149,9 +155,9 @@ app.MapPut("/api/board", async (BoardCommand command, HttpContext ctx, IHttpClie
         if (board.PresenterId != user.Id || board.PresenterSeen < DateTimeOffset.UtcNow.AddSeconds(-30))
             return Results.StatusCode(403);
         if (command.BaseRevision != board.State.Revision) return Results.Conflict(board.State);
-        var next = new BoardState(board.State.Revision + 1, command.Strokes);
+        var next = new BoardState(2, "excalidraw", board.State.Revision + 1, command.Scene);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(next, json);
-        if (bytes.Length > 128 * 1024) return Results.Json(new { error = "تخته پر شده است؛ چند خط را حذف یا تخته را پاک کنید." }, statusCode: 413);
+        if (bytes.Length > Whiteboard.SnapshotLimit) return Results.Json(new { error = "تخته پر شده است؛ چند خط را حذف یا تخته را پاک کنید." }, statusCode: 413);
         var path = Path.Combine(dataPath, user.Room + ".json");
         var temp = path + ".tmp";
         await File.WriteAllBytesAsync(temp, bytes);
@@ -219,12 +225,6 @@ app.Run();
 record JoinRequest(string Name, string Room, string Role, string? Code);
 record RecordingCommand(bool Active);
 record DemoUser(string Id, string Name, string Room, bool Presenter, DateTimeOffset Expires);
-record Stroke(string Color, double Width, double[][] Points);
-record BoardCommand(long BaseRevision, Stroke[] Strokes);
-record BoardState(long Revision, Stroke[] Strokes)
-{
-    public BoardState() : this(0, []) { }
-}
 class BoardRoom
 {
     public bool Recording { get; set; }

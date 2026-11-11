@@ -47,7 +47,10 @@ function paintClassRecording(state) {
   if (screen) {
     c.fillStyle = '#101a2d'; c.fillRect(12, 48, 956, 660);
     if (screen.readyState >= 2) fitRecordingImage(c, screen, 12, 48, 956, 660);
-  } else fitRecordingImage(c, canvas, 12, 48, 956, 660);
+  } else {
+    const frame = boardAdapter?.getRecordingFrame();
+    if (frame) fitRecordingImage(c, frame, 12, 48, 956, 660);
+  }
 
   const people = [room.localParticipant, ...room.remoteParticipants.values()];
   const columns = people.length > 6 ? 2 : 1;
@@ -94,6 +97,7 @@ async function startClassRecording() {
   const audio = new AudioContext();
   const state = { canvas: output, context: output.getContext('2d'), audio, destination: audio.createMediaStreamDestination(), sources: new Map(), chunks: [], bytes: 0, started: Date.now() };
   try {
+    await boardAdapter.flushRecordingFrame();
     await audio.resume();
     // Keep the audio clock running even when no microphone has been published.
     state.silence = audio.createConstantSource(); state.silence.offset.value = 0;

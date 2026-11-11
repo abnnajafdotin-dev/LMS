@@ -1,0 +1,12 @@
+{
+  "elements": [{
+    "id": "fixture-rectangle", "type": "rectangle", "x": 120, "y": 100,
+    "width": 240, "height": 160, "angle": 0, "strokeColor": "#243451",
+    "backgroundColor": "transparent", "fillStyle": "hachure", "strokeWidth": 2,
+    "strokeStyle": "solid", "roughness": 1, "opacity": 100,
+    "seed": 42, "version": 1, "versionNonce": 123, "index": "a0",
+    "isDeleted": false, "groupIds": [], "frameId": null, "boundElements": null,
+    "updated": 1, "link": null, "locked": false, "roundness": { "type": 3 }
+  }],
+  "appState": { "viewBackgroundColor": "#ffffff" }
+}

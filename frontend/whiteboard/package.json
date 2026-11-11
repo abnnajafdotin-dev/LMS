@@ -1,0 +1,21 @@
+{
+  "name": "lms-whiteboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build && node scripts/copy-assets.mjs"
+  },
+  "engines": { "node": ">=22.12.0" },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  }
+}

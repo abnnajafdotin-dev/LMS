@@ -1,0 +1,5 @@
+/* Keep Excalidraw geometry LTR inside the Persian classroom shell. */
+.classroom-whiteboard { direction: ltr; width: 100%; height: 100%; min-height: 420px; }
+.classroom-whiteboard .excalidraw { --color-primary: #0753ff; --color-primary-darker: #063ec2; }
+.classroom-whiteboard .excalidraw [title="Library"], .classroom-whiteboard .excalidraw .library-button { display: none; }
+@media (max-width: 600px) { .classroom-whiteboard { min-height: 420px; } }

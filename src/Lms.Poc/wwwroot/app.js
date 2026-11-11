@@ -1,9 +1,10 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let room, credentials, connected = false, backendReady = true, strokes = [], revision = 0;
-let drawing = false, dirty = false, saving = false, fetching = false, activeStroke;
-let color = '#243451', pollTimer, clockTimer, startedAt, toastTimer, saveTimer;
-const canvas = $('board'), ctx = canvas.getContext('2d');
+let room, credentials, connected = false, backendReady = true, revision = 0;
+let boardAdapter, boardScene, boardLoaded = false, authorityLost = false, saveBlocked = false, unsavedBackup, conflictBackup, sceneCounter = 0, firstDirtyAt = 0;
+let dirty = false, saving = false, fetching = false;
+let pollTimer, clockTimer, startedAt, toastTimer, saveTimer;
+
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const invite = new URLSearchParams(location.search);
 if (/^[a-zA-Z0-9-]{1,40}$/.test(invite.get('room') || '')) $('room-name').value = invite.get('room');
@@ -24,7 +25,7 @@ function connectionStatus(text, state) { $('connection').textContent = text; $('
 async function api(path, options = {}) {
   const response = await fetch('/api/' + path, { ...options, headers: { 'Content-Type': 'application/json', ...(credentials ? { Authorization: 'Bearer ' + credentials.access } : {}), ...options.headers } });
   let data = null; try { data = await response.json(); } catch { /* Empty HTTP response. */ }
-  if (!response.ok) { const error = new Error(data?.error || (response.status === 403 ? 'اجازه انجام این عملیات را ندارید.' : 'ارتباط با سرور برقرار نشد.')); error.status = response.status; throw error; }
+  if (!response.ok) { const error = new Error(data?.error || (response.status === 403 ? 'اجازه انجام این عملیات را ندارید.' : 'ارتباط با سرور برقرار نشد.')); error.status = response.status; error.data = data; throw error; }
   return data;
 }
 async function health() {
@@ -70,18 +71,23 @@ $('join-form').addEventListener('submit', async event => {
     $('self-role').textContent = presenter ? 'مدرس کلاس' : 'فراگیر';
     $('role-badge').textContent = presenter ? 'مدرس' : 'فراگیر';
     $('record-class').hidden = !presenter;
-    $('toggle-screen').hidden = !presenter; $('drawing-tools').hidden = !presenter; $('readonly-note').hidden = presenter;
-    canvas.classList.toggle('readonly', !presenter);
+    $('toggle-screen').hidden = !presenter; $('readonly-note').hidden = presenter;
     $('board-role').textContent = presenter ? 'قلم در اختیار شماست' : 'مشاهده تخته مدرس';
     connectionStatus('متصل به LiveKit', 'ok'); renderPeople(); updateControls();
-    await syncBoard();
+    const { mount } = await import('/vendor/whiteboard/classroom.js');
+    const snapshot = await api('board');
+    revision = snapshot.revision; boardScene = snapshot.scene;
+    boardAdapter?.dispose();
+    boardAdapter = await mount($('board'), { scene: boardScene, canEdit: false, onSceneChange: changed });
+    boardLoaded = true; updateBoardControls();
+    boardStatus('ذخیره شد · نسخه ' + revision.toLocaleString('fa-IR'));
     pollTimer = setInterval(poll, 3000);
     startedAt = Date.now(); clockTimer = setInterval(() => { const s = Math.floor((Date.now() - startedAt) / 1000); $('clock').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }, 1000);
   } catch (error) {
     $('join-error').textContent = error.message;
     await room?.disconnect();
     if (credentials) { try { await api('leave', { method: 'POST' }); } catch {} }
-    credentials = null; connected = false; $('lobby').hidden = false; $('classroom').hidden = true;
+    boardAdapter?.dispose(); boardAdapter = null; boardLoaded = false; credentials = null; connected = false; $('lobby').hidden = false; $('classroom').hidden = true;
   } finally { $('join-button').disabled = false; }
 });
 
@@ -138,6 +144,7 @@ function renderPeople() {
   }
 }
 function updateControls() {
+  updateBoardControls();
   if (!room) return;
   const raised = room.localParticipant.attributes?.['hand.raised'] === 'true';
   $('raise-hand').hidden = credentials?.role !== 'participant';
@@ -191,6 +198,7 @@ function updateStage() {
   $('stage-title').textContent = sharing ? '▣ صفحه مدرس' : '✎ تخته کلاس';
   $('return-board').hidden = !sharing || credentials?.role !== 'presenter';
   $('board-status').hidden = sharing;
+  if (!sharing) requestAnimationFrame(() => boardAdapter?.resize());
 }
 $('return-board').onclick = () => mediaAction('return-board', () => room.localParticipant.setScreenShareEnabled(false));
 $('copy-invite').onclick = async () => {
@@ -217,81 +225,92 @@ $('chat-form').onsubmit = async event => {
   catch { toast('ارسال پیام انجام نشد.'); }
 };
 
-function renderBoard() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const stroke of strokes) {
-    if (!stroke.points?.length) continue;
-    ctx.strokeStyle = stroke.color; ctx.fillStyle = stroke.color; ctx.lineWidth = stroke.width;
-    ctx.beginPath();
-    stroke.points.forEach(([x, y], i) => { if (i === 0) ctx.moveTo(x * canvas.width, y * canvas.height); else ctx.lineTo(x * canvas.width, y * canvas.height); });
-    if (stroke.points.length === 1) { ctx.arc(stroke.points[0][0] * canvas.width, stroke.points[0][1] * canvas.height, stroke.width / 2, 0, 2 * Math.PI); ctx.fill(); } else ctx.stroke();
-  }
-  $('board-placeholder').hidden = strokes.length > 0;
+function updateBoardControls() {
+  boardAdapter?.setEditable(boardLoaded && connected && backendReady && !authorityLost && credentials?.role === 'presenter');
+  $('leave-unsaved').hidden = !dirty || saving || (!saveBlocked && !authorityLost && backendReady && connected);
 }
-function point(event) {
-  const rect = canvas.getBoundingClientRect();
-  return [Number(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)).toFixed(4)), Number(Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)).toFixed(4))];
+function preserveUnsaved(scene) {
+  unsavedBackup = structuredClone(scene); $('download-unsaved').hidden = false;
 }
-canvas.addEventListener('pointerdown', event => {
-  if (!credentials || credentials.role !== 'presenter' || !connected || !backendReady || fetching || event.button !== 0) return;
-  if (strokes.length >= 300) { toast('حد دمو ۳۰۰ خط است. تخته را پاک کنید.'); return; }
-  drawing = true; activeStroke = { color, width: Number($('pen-width').value), points: [point(event)] };
-  strokes.push(activeStroke); canvas.setPointerCapture(event.pointerId); changed(); renderBoard();
-});
-canvas.addEventListener('pointermove', event => {
-  if (!drawing) return;
-  if (!connected) { finishStroke(); return; }
-  const next = point(event), prev = activeStroke.points.at(-1);
-  if (activeStroke.points.length < 1000 && Math.hypot(next[0] - prev[0], next[1] - prev[1]) > .001) { activeStroke.points.push(next); changed(); renderBoard(); }
-});
-function finishStroke() { if (!drawing) return; drawing = false; activeStroke = null; changed(); }
-canvas.addEventListener('pointerup', finishStroke); canvas.addEventListener('pointercancel', finishStroke); canvas.addEventListener('lostpointercapture', finishStroke);
-document.querySelectorAll('.color').forEach(el => el.onclick = () => { color = el.dataset.color; document.querySelectorAll('.color').forEach(c => c.classList.toggle('selected', c === el)); });
-$('undo').onclick = () => { if (!connected || drawing) return; strokes.pop(); renderBoard(); changed(); };
-$('clear-board').onclick = () => { if (!connected || drawing) return; strokes = []; renderBoard(); changed(); };
-function changed() { dirty = true; boardStatus('در حال همگام‌سازی…', true); if (!saveTimer) saveTimer = setTimeout(() => { saveTimer = null; saveBoard(); }, 250); }
+$('download-unsaved').onclick = () => {
+  const data = { schemaVersion: 2, engine: 'excalidraw', scene: unsavedBackup || boardScene, previousConflict: conflictBackup || null };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'unsaved-whiteboard.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+$('leave-unsaved').onclick = () => {
+  if (saving) return;
+  clearTimeout(saveTimer); dirty = false; saveBlocked = false;
+  $('leave').click();
+};
+function changed(scene) {
+  boardScene = scene; sceneCounter++; saveBlocked = false;
+  if (!dirty) firstDirtyAt = Date.now();
+  dirty = true; preserveUnsaved(scene); boardStatus('در حال همگام‌سازی…', true);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveTimer = null; saveBoard(); }, Math.max(0, Math.min(500, 2000 - (Date.now() - firstDirtyAt))));
+}
 async function saveBoard() {
-  if (saving || !dirty || !connected) return;
+  if (saving || !dirty || !connected || !backendReady || saveBlocked || authorityLost) return;
   saving = true; dirty = false;
-  const sent = structuredClone(strokes);
+  const session = credentials, sent = structuredClone(boardScene);
   try {
-    const result = await api('board', { method: 'PUT', body: JSON.stringify({ baseRevision: revision, strokes: sent }) });
+    const result = await api('board', { method: 'PUT', body: JSON.stringify({ schemaVersion: 2, engine: 'excalidraw', baseRevision: revision, scene: sent }) });
+    if (session !== credentials) return;
     revision = result.revision;
-    if (!dirty) boardStatus(result.notified ? `ذخیره شد · نسخه ${revision.toLocaleString('fa-IR')}` : 'ذخیره شد · بازیابی با polling');
+    if (!dirty) { boardStatus(result.notified ? 'ذخیره شد · نسخه ' + revision.toLocaleString('fa-IR') : 'ذخیره شد · بازیابی با polling'); $('download-unsaved').hidden = !conflictBackup; unsavedBackup = null; }
   } catch (error) {
-    connected = error.status === 403 ? false : connected;
-    drawing = false; activeStroke = null; dirty = false;
-    toast(error.status === 409 ? 'وضعیت سرور تغییر کرده است؛ تخته دوباره دریافت شد.' : error.message);
-    boardStatus('تغییر تأیید نشد؛ در حال بازیابی…', true);
-    if (error.status === 403) connectionStatus('مجوز مدرس منقضی شد؛ دوباره وارد شوید', 'bad');
-    try { const snapshot = await api('board'); strokes = snapshot.strokes; revision = snapshot.revision; renderBoard(); boardStatus('آخرین وضعیت ذخیره‌شده بازیابی شد'); }
-    catch { boardStatus('ذخیره تأیید نشد؛ اتصال را بررسی کنید', true); }
-  } finally { saving = false; if (dirty) saveBoard(); }
+    if (session !== credentials) return;
+    preserveUnsaved(boardScene);
+    if (error.status === 409) {
+      conflictBackup = structuredClone(boardScene);
+      dirty = false;
+      const snapshot = error.data;
+      if (snapshot?.schemaVersion === 2) { revision = snapshot.revision; boardScene = snapshot.scene; sceneCounter++; boardAdapter.applyScene(boardScene); }
+      else { boardLoaded = false; }
+      boardStatus('تعارض نسخه؛ وضعیت سرور بازیابی شد. کپی تغییرات قبلی قابل دریافت است.', true);
+      toast('تغییرات قبلی تأیید نشد؛ نسخه محلی را از پایین تخته دریافت کنید.');
+    } else {
+      dirty = true;
+      if (error.status === 401 || error.status === 403) { authorityLost = true; boardStatus('مجوز ویرایش پایان یافته؛ تغییرات را دریافت و دوباره وارد شوید.', true); }
+      else if (error.status === 400 || error.status === 413) { saveBlocked = true; boardStatus('ذخیره نشد؛ محتوا را کم یا اصلاح کنید. کپی محلی قابل دریافت است.', true); }
+      else { backendReady = false; boardStatus('ذخیره تأیید نشد؛ تغییرات محلی حفظ شد. تلاش مجدد پس از اتصال.', true); }
+    }
+  } finally {
+    saving = false; updateBoardControls();
+    if (dirty && connected && backendReady && !saveBlocked && !authorityLost) { clearTimeout(saveTimer); saveTimer = setTimeout(saveBoard, 500); }
+  }
 }
 async function syncBoard() {
-  if (!credentials || fetching || saving || dirty || drawing) return;
+  if (!credentials || !boardLoaded || fetching || saving || dirty) return;
   fetching = true;
-  try { const snapshot = await api('board'); if (snapshot.revision >= revision) { strokes = snapshot.strokes; revision = snapshot.revision; renderBoard(); boardStatus(`ذخیره شد · نسخه ${revision.toLocaleString('fa-IR')}`); } }
-  catch { boardStatus('دریافت تخته ناموفق؛ تلاش مجدد…', true); }
+  const session = credentials, counter = sceneCounter;
+  try {
+    const snapshot = await api('board');
+    if (session === credentials && counter === sceneCounter && !saving && !dirty && snapshot.revision >= revision) {
+      if (snapshot.revision !== revision) { boardScene = snapshot.scene; revision = snapshot.revision; boardAdapter.applyScene(boardScene); }
+      boardStatus('ذخیره شد · نسخه ' + revision.toLocaleString('fa-IR'));
+    }
+  } catch { boardStatus('دریافت تخته ناموفق؛ تلاش مجدد…', true); }
   finally { fetching = false; }
 }
 async function poll() {
   if (!credentials) return;
-  try { const data = await api('heartbeat', { method: 'POST' }); $('recording-notice').hidden = !data.recording; const wasReady = backendReady; backendReady = true; if (data.revision !== revision || !wasReady) await syncBoard(); if (dirty && connected) saveBoard(); }
-  catch (error) { backendReady = false; boardStatus('بک‌اند در دسترس نیست؛ رسم متوقف شد', true); if (error.status === 403) { connected = false; connectionStatus('مجوز مدرس تغییر کرده است', 'bad'); } }
+  try { const data = await api('heartbeat', { method: 'POST' }); $('recording-notice').hidden = !data.recording; const wasReady = backendReady; backendReady = true; if (data.revision !== revision || !wasReady) await syncBoard(); updateBoardControls(); if (dirty && connected) saveBoard(); }
+  catch (error) { backendReady = false; boardStatus('بک‌اند در دسترس نیست؛ رسم متوقف شد', true); if (error.status === 401 || error.status === 403) { authorityLost = true; connectionStatus('مجوز نشست تغییر کرده است', 'bad'); } updateBoardControls(); }
 }
 $('leave').onclick = async () => {
   $('leave').disabled = true;
   await stopClassRecording();
   if (recordingNeedsDownload) { toast('ابتدا فایل ضبط را دریافت کنید، سپس خارج شوید.'); $('leave').disabled = false; return; }
-  finishStroke(); clearTimeout(saveTimer); saveTimer = null;
+  clearTimeout(saveTimer); saveTimer = null;
   await saveBoard();
-  // A previous save may still be in flight; do not claim pending strokes were saved.
+  // An in-flight request must finish before leaving the room.
   if (saving || dirty) { toast('همگام‌سازی در حال انجام است؛ چند لحظه دیگر خارج شوید.'); $('leave').disabled = false; return; }
   clearInterval(pollTimer); clearInterval(clockTimer);
   try { await api('leave', { method: 'POST' }); } catch {}
-  await room.disconnect(); location.href = location.pathname;
+  boardAdapter?.dispose(); boardAdapter = null; boardLoaded = false;
+  await room.disconnect(); credentials = null; location.href = location.pathname;
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && credentials) { poll(); syncBoard(); } });
 window.addEventListener('beforeunload', event => { if (dirty || saving || classRecording || recordingNeedsDownload) { event.preventDefault(); event.returnValue = ''; } });

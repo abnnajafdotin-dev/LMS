@@ -4,6 +4,7 @@ Set-Location -LiteralPath $projectRoot
 $env:DOTNET_CLI_HOME = Join-Path $projectRoot '.tools/cli'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 if (-not (Test-Path '.tools/livekit/livekit-server.exe') -or -not (Test-Path '.tools/dotnet/dotnet.exe')) { throw 'Run scripts/setup.ps1 first.' }
+if (-not (Test-Path 'src/Lms.Poc/wwwroot/vendor/whiteboard/classroom.js')) { throw 'Run scripts/setup-whiteboard.ps1 to build the whiteboard assets first.' }
 if ((Test-NetConnection 127.0.0.1 -Port 5080 -WarningAction SilentlyContinue -InformationLevel Quiet) -or (Test-NetConnection 127.0.0.1 -Port 7880 -WarningAction SilentlyContinue -InformationLevel Quiet)) {
     $stateFile = Join-Path $projectRoot '.run/processes.json'
     if (Test-Path -LiteralPath $stateFile) {
