@@ -1,5 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id);
+$('skip-content').addEventListener('click', event => {
+  event.preventDefault();
+  const target = $('classroom').hidden ? $('name') : $('classroom');
+  target.focus();
+  target.scrollIntoView({ block: 'start' });
+});
 let room, credentials, connected = false, backendReady = true, revision = 0;
 let boardAdapter, boardScene, boardLoaded = false, authorityLost = false, saveBlocked = false, unsavedBackup, conflictBackup, sceneCounter = 0, firstDirtyAt = 0;
 let dirty = false, saving = false, fetching = false;

@@ -1,0 +1,126 @@
+/* Classroom shell: preserve the reference palette and editor geometry. */
+:root {
+  --shell-bg: #020f20;
+  --shell-line: #344762;
+  --action: #0753ff;
+  --focus: #00cbd8;
+  --muted: #a9b8d0;
+}
+body { line-height: 1.8; }
+h1, h2, h3 { text-wrap: balance; }
+button, a, input, label { -webkit-tap-highlight-color: #55b8ff30; }
+button, a, .role { touch-action: manipulation; }
+button { filter: none; }
+button:hover { filter: none; }
+button:disabled { cursor: not-allowed; transform: none; opacity: .55; }
+:where(button, a, input):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.skip-link { position: fixed; inset-block-start: 8px; inset-inline-start: 16px; z-index: 100; padding: 10px 18px; background: #fff; color: #10205c; border-radius: 8px; transform: translateY(-160%); }
+.skip-link:focus { transform: none; }
+.primary, .subtle, .media-button, .leave-button, .chat-form button, .role {
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+.primary, .subtle, .media-button, .leave-button { min-height: 44px; }
+.subtle { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; line-height: 1.7; }
+button:active:not(:disabled) { transform: none; box-shadow: inset 0 2px 4px #0003; }
+.role:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 3px; }
+.role input { width: 1px; height: 1px; }
+.role small, label small { font-size: 11px; }
+.role { min-height: 108px; align-content: center; }
+.join-card { padding: 32px; border-radius: 18px; }
+.join-card h2 { margin-top: 20px; }
+.join-card .muted { font-size: 13px; }
+.join-card form > label, #code-field > label { font-size: 13px; margin-top: 20px; gap: 12px; }
+.join-card input:not([type=radio]) { min-height: 46px; }
+.permission-note, .intro-note, .session-card p { font-size: 12px; line-height: 2; }
+.step { font-size: 12px; }
+.primary { font-weight: 600; }
+.room-heading { gap: 16px; }
+.room-heading h1 { line-height: 1.8; overflow-wrap: anywhere; }
+.room-heading h1 span { font-size: 13px; letter-spacing: 0; }
+.room-badges { gap: 12px; flex-wrap: wrap; }
+.timer { font-family: Vazirmatn, Tahoma, sans-serif; font-variant-numeric: tabular-nums; min-width: 74px; text-align: center; }
+.main-stage, .sidebar { border-radius: 20px; }
+.stage-tabs { gap: 12px; }
+.stage-tabs strong { font-size: 16px; flex-shrink: 0; }
+.save-status { font-size: 12px; color: #53627d; line-height: 1.8; overflow-wrap: anywhere; }
+.save-status.unsaved { color: #89560b; }
+.board-top { color: #53627d; font-size: 12px; }
+.board-bottom { color: #53627d; font-size: 12px; }
+.board-bottom .subtle { min-height: 40px; }
+.stage-footer { color: #53627d; font-size: 11px; gap: 12px; }
+.role-badge { color: #1546b4; font-size: 11px; }
+.section-heading { padding: 16px 20px; }
+.section-heading h2 { font-size: 15px; font-weight: 700; color: #1546b4; }
+.count { font-size: 12px; min-width: 26px; text-align: center; }
+.person { gap: 10px; line-height: 1.8; }
+.person small, .person .person-role { color: #53627d; }
+.chat-welcome { color: #53627d; padding: 24px 16px; line-height: 1.9; }
+.chat-welcome p { font-size: 13px; }
+.chat-welcome small { font-size: 11px; }
+.message p { overflow-wrap: anywhere; line-height: 1.9; }
+.message-head { color: #53627d; }
+.chat-form { align-items: center; padding: 4px; margin: 12px; border-radius: 16px; }
+.chat-form:focus-within { border-color: #0753ff; box-shadow: 0 0 0 2px #0753ff20; }
+.chat-form input:not([type=radio]):not([type=range]) { background: #fff; font-size: 13px; min-width: 0; min-height: 44px; }
+.chat-form button { flex-shrink: 0; width: 44px; height: 44px; font-size: 22px; }
+.chat-messages, .participant-list { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #b9c5d9 transparent; }
+.media-button.enabled { color: #14652a; }
+.controlbar { border-top: 1px solid #23314a; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+.self-info { min-width: 0; max-width: 210px; gap: 10px; }
+.self-info > div { min-width: 0; }
+.self-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.self-info small { font-size: 11px; }
+.toast { bottom: 112px; font-size: 13px; }
+@media (hover: hover) and (pointer: fine) {
+  .primary:hover:not(:disabled), .chat-form button:hover:not(:disabled) { background: #0644d5; box-shadow: 0 3px 10px #0753ff25; }
+  .subtle:hover:not(:disabled), .media-button:hover:not(:disabled) { background: #34445e; border-color: #617594; }
+  .media-button.enabled:hover:not(:disabled) { background: #b8f6c0; color: #105123; }
+  #toggle-screen.enabled:hover:not(:disabled) { background: #0644d5; color: #fff; }
+  .leave-button:hover:not(:disabled) { background: #cf1831; }
+  .role:hover { border-color: #729cde; background: #163051; }
+  .role.selected:hover { background: #194580; }
+  .brand:hover { color: #a9dcff; }
+}
+:is(.primary, .subtle, .media-button, .leave-button, .chat-form button):active:not(:disabled) {
+  box-shadow: inset 0 2px 4px #0003;
+}
+@media (min-width: 761px) {
+  .excalidraw-wrap { flex: 1; height: auto; min-height: 0; }
+  .excalidraw-wrap .classroom-whiteboard { min-height: 0; }
+  .classroom { padding-bottom: max(108px, calc(92px + env(safe-area-inset-bottom))); }
+}
+@media (min-width: 761px) and (max-width: 1100px), (min-width: 761px) and (max-height: 650px) {
+  body:has(.classroom:not([hidden])) { overflow: auto; }
+  .classroom { height: auto; min-height: 100dvh; padding-bottom: 0; }
+  .workspace { flex: auto; }
+  .excalidraw-wrap { height: 480px; flex: auto; }
+  .controlbar { position: static; flex-wrap: wrap; margin-top: 16px; padding-inline: 0; }
+  .media-controls { flex-wrap: wrap; justify-content: center; gap: 8px; }
+}
+@media (max-width: 760px) {
+  .lobby { padding-inline: 16px; }
+  .join-card { padding: 24px; }
+  .intro h1 { font-size: clamp(32px, 8vw, 39px); letter-spacing: -.5px; }
+  .feature-row { flex-wrap: wrap; font-size: 12px; }
+  .top-meta { gap: 8px; }
+  .classroom { padding-bottom: 0; }
+  .room-heading { flex-direction: column; align-items: stretch; gap: 12px; }
+  .room-badges { gap: 8px; }
+  .room-badges .subtle { font-size: 12px; padding: 8px 12px; }
+  .stage-tabs { height: auto; min-height: 56px; flex-wrap: wrap; padding: 12px; }
+  .stage-tabs strong { font-size: 15px; }
+  .save-status { font-size: 12px; }
+  .board-top { gap: 8px; flex-wrap: wrap; padding: 12px; }
+  .excalidraw-wrap { height: 460px; }
+  .stage-footer { flex-wrap: wrap; font-size: 11px; padding: 12px; }
+  .controlbar { position: static; margin-top: 16px; padding-inline: 0; gap: 12px; }
+  .media-controls > .media-button { height: 44px; min-height: 44px; font-size: 12px; }
+  .leave-button { font-size: 12px; }
+  .toast { bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+}
