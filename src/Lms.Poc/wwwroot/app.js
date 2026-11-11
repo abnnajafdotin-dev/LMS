@@ -1,5 +1,34 @@
 'use strict';
 const $ = id => document.getElementById(id);
+const mobileRoom = matchMedia('(max-width: 760px)');
+const mobilePanelButtons = [...document.querySelectorAll('.mobile-room-nav button')];
+function setMobilePanel(panelId, restoreFocus = false) {
+  const sidebar = $('room-sidebar');
+  const previous = sidebar.dataset.panel;
+  if (panelId) sidebar.dataset.panel = panelId;
+  else delete sidebar.dataset.panel;
+  for (const button of mobilePanelButtons) {
+    const target = button.getAttribute('aria-controls');
+    button.setAttribute('aria-expanded', String(target === panelId));
+    if (restoreFocus && target === previous) button.focus({ preventScroll: true });
+  }
+  if (panelId) $('mobile-panel-close').focus({ preventScroll: true });
+}
+for (const button of mobilePanelButtons) {
+  button.addEventListener('click', () => {
+    if (!mobileRoom.matches) return;
+    const panelId = button.getAttribute('aria-controls');
+    setMobilePanel($('room-sidebar').dataset.panel === panelId ? null : panelId);
+  });
+}
+$('mobile-panel-close').addEventListener('click', () => setMobilePanel(null, true));
+mobileRoom.addEventListener('change', () => setMobilePanel(null));
+$('classroom').addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('room-sidebar').dataset.panel) {
+    event.preventDefault();
+    setMobilePanel(null, true);
+  }
+});
 $('skip-content').addEventListener('click', event => {
   event.preventDefault();
   const target = $('classroom').hidden ? $('name') : $('classroom');
@@ -74,6 +103,8 @@ $('join-form').addEventListener('submit', async event => {
     $('self-name').textContent = credentials.name;
     $('self-avatar').textContent = credentials.name[0];
     const presenter = credentials.role === 'presenter';
+    $('classroom').dataset.role = credentials.role;
+    setMobilePanel(null);
     $('self-role').textContent = presenter ? 'مدرس کلاس' : 'فراگیر';
     $('role-badge').textContent = presenter ? 'مدرس' : 'فراگیر';
     $('record-class').hidden = !presenter;
@@ -112,6 +143,7 @@ function renderPeople() {
   if (!room) return;
   const people = [room.localParticipant, ...room.remoteParticipants.values()];
   $('people-count').textContent = people.length.toLocaleString('fa-IR');
+  $('mobile-people-count').textContent = $('people-count').textContent;
   const activeIds = new Set(people.map(p => 'tile-' + p.identity));
   [...$('video-grid').children].forEach(el => { if (!activeIds.has(el.id)) el.remove(); });
   $('participant-list').replaceChildren();
@@ -140,6 +172,8 @@ function renderPeople() {
   // Muted/unpublished video must not leave a stale image on a participant tile.
   for (const person of people) {
     const tile = document.getElementById('tile-' + person.identity);
+    tile.classList.toggle('mic-on', Boolean(person.isMicrophoneEnabled));
+    tile.classList.toggle('hand-raised', person.attributes?.['hand.raised'] === 'true');
     const publication = person.getTrackPublication(LivekitClient.Track.Source.Camera);
     if (publication?.track && !tile.querySelector('video')) {
       const video = publication.track.attach(); video.autoplay = true; video.playsInline = true;

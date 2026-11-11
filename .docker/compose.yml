@@ -45,17 +45,12 @@ services:
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
       LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:?Set LIVEKIT_DOMAIN}
     ports:
-      - "80:80"
-      - "443:443"
+      - "5010:80/tcp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
     depends_on:
       - app
       - livekit
 
 volumes:
   app-data:
-  caddy-data:
-  caddy-config:
