@@ -115,12 +115,15 @@
 }
 .controlbar .media-controls > :is(#toggle-mic, #toggle-camera, #toggle-screen, #raise-hand),
 .controlbar .leave-button {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
   width: 46px;
   height: 46px;
   padding: 0;
   font-size: 0;
+  line-height: 0;
   background: var(--control-surface);
 }
 .controlbar .media-controls > .media-button > span { display: none; }
@@ -139,7 +142,7 @@
 }
 .controlbar #toggle-screen.enabled { border-color: #7295ff; }
 .controlbar #raise-hand { border-color: #7295ff; }
-.controlbar #raise-hand::before { content: '✋'; font-size: 20px; }
+.controlbar #raise-hand::before { content: '✋'; font-size: 20px; line-height: 1; }
 .controlbar #raise-hand.enabled { background: #ffe5a8; border-color: #ffe5a8; }
 .controlbar .leave-button { background: #df243c; }
 .controlbar #start-audio {
